@@ -121,11 +121,11 @@ get_status
 
 ![ image and System Overview](Battery.jpg) 
 
-### System Overview
+### BMS
 
 ![BMS](BMS.jpg)
 
-### Hardware Setupk
+### System Overview
 
 ![Hardware Setup map](Setup.png)
 
