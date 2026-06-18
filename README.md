@@ -108,7 +108,7 @@ get_status
 
 ## Future Improvements
 
-* Mobile Application Integration
+* AI Integration
 * Cloud Data Logging
 * Predictive Battery Health Analysis
 * GPS Tracking Integration
@@ -123,7 +123,7 @@ get_status
 
 ### BMS
 
-![BMS](BMS.jpg)
+![BMS](BMS.jpeg)
 
 ### System Overview
 
