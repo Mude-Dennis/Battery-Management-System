@@ -117,10 +117,13 @@ get_status
 
 ## Project Images
 
+### Test Battery
+
+![ image and System Overview](Battery.jpg) 
+
 ### System Overview
 
-![Test Battery image and System Overview](Battery.jpg) 
-![Wiring Illustration](BMS.jpg)
+![BMS](BMS.jpg)
 
 ### Hardware Setupk
 
