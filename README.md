@@ -124,8 +124,11 @@ get_status
 
 ### Hardware Setupk
 
-![Hardware Setup map](setup.jpg)
+![Hardware Setup map](Setup.png)
 
+### Mobile Application
+
+![Mobile Application](Application.png)
 
 ## Author
 
