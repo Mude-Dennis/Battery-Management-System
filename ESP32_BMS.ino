@@ -3,15 +3,10 @@
 #include <WebServer.h>
 #include <BluetoothSerial.h>
 
-// ============================================================================
-// SECTION 1: CONFIGURATION - PINS, CALIBRATION, TIMING
-// ============================================================================
-
 #define FIRMWARE_VERSION        "1.0.0"
 #define DEVICE_NAME              "SmartBMS-ESP32"
 #define SERIAL_BAUD_RATE          115200
 
-// --- Pin assignments (ESP32 DevKit-1 / Wokwi "esp32" board) ---
 #define PIN_VOLTAGE_SENSE         34   // Voltage divider output -> battery voltage
 #define PIN_CURRENT_SENSE         35   // ACS712 OUT pin -> current sensing
 #define PIN_TEMP_SENSE            32   // LM35 OUT pin -> temperature sensing
@@ -21,60 +16,54 @@
 #define PIN_BATTERY_DISCONNECT    33   // Drives relay/MOSFET to disconnect battery on fault
 #define PIN_BUZZER                14   // Reserved for future audible alarm
 
-// --- ADC configuration ---
+// ADC configuration
 #define ADC_RESOLUTION_BITS       12
 #define ADC_MAX_VALUE             4095.0f
 #define ADC_REF_VOLTAGE           3.3f
 
-// --- Voltage divider calibration (CALIBRATE) ---
-// Divider: Vbat -> R1 -> ADC_PIN -> R2 -> GND
-// NOTE: For a 24V max system, ensure (R1+R2)/R2 keeps ADC pin <= 3.3V at worst case.
-// Example for 24V max: R1=120k, R2=15k -> ratio 9.0 -> 24V gives ~2.67V at the pin.
+// Voltage divider calibration (CALIBRATE)
+
 #define VOLTAGE_DIVIDER_R1         120000.0f   // Ohms (CALIBRATE: measure actual resistor)
 #define VOLTAGE_DIVIDER_R2          15000.0f   // Ohms (CALIBRATE: measure actual resistor)
 #define VOLTAGE_DIVIDER_RATIO      ((VOLTAGE_DIVIDER_R1 + VOLTAGE_DIVIDER_R2) / VOLTAGE_DIVIDER_R2)
 #define VOLTAGE_CALIBRATION_OFFSET  0.0f        // Volts (CALIBRATE)
 
-// --- ACS712 calibration (CALIBRATE) ---
-// Variants: ACS712-05B (185mV/A), ACS712-20A (100mV/A), ACS712-30A (66mV/A)
+// --- ACS712 calibration 
+
 #define ACS712_SENSITIVITY_MV_PER_A   100.0f    // mV per Amp (CALIBRATE: depends on module variant)
 #define ACS712_ZERO_CURRENT_VOLTAGE    1.65f    // Volts at 0A, ideally ADC_REF_VOLTAGE/2 (CALIBRATE)
 #define CURRENT_CALIBRATION_OFFSET     0.0f     // Amps (CALIBRATE)
 #define CURRENT_FILTER_SAMPLES         20
 
-// --- LM35 calibration (CALIBRATE) ---
+// LM35 calibration (CALIBRATE)
 #define LM35_MV_PER_DEGREE_C       10.0f
 #define TEMPERATURE_CALIBRATION_OFFSET 0.0f     // Degrees C (CALIBRATE)
 
-// --- Sampling / timing intervals (ms) ---
+// Sampling / timing intervals (ms)
 #define SENSOR_SAMPLE_INTERVAL_MS      500
 #define PROTECTION_CHECK_INTERVAL_MS   500
 #define STATUS_REPORT_INTERVAL_MS      2000
 #define FAN_CONTROL_INTERVAL_MS        1000
 
-// --- Fan control thresholds ---
+// Fan control thresholds
 #define FAN_ON_TEMP_C               40.0f
 #define FAN_OFF_TEMP_C               35.0f
 
-// --- Wi-Fi configuration (EDIT BEFORE DEPLOYMENT) ---
+// Wi-Fi configuration
 #define WIFI_SSID                  "YOUR_WIFI_SSID"
 #define WIFI_PASSWORD                "YOUR_WIFI_PASSWORD"
 #define WIFI_CONNECT_TIMEOUT_MS      15000
 #define WIFI_RECONNECT_INTERVAL_MS   30000
 #define HTTP_SERVER_PORT              80
 
-// --- Bluetooth configuration ---
+// Bluetooth configuration
 #define BLUETOOTH_DEVICE_NAME        "SmartBMS_ESP32"
 
-// --- Safety / fault latching ---
+// Safety / fault latching
 #define ENABLE_BATTERY_DISCONNECT_ON_FAULT  true
 #define FAULT_LATCH_REQUIRES_MANUAL_CLEAR   true
 
-// ============================================================================
-// SECTION 2: DATA STRUCTURES & ENUMERATIONS
-// ============================================================================
-
-// --- Battery type selector ---
+// Battery type selector
 enum class BatteryType : uint8_t {
     MOTORCYCLE = 0,
     TUKTUK     = 1,
@@ -82,7 +71,7 @@ enum class BatteryType : uint8_t {
     TRUCK      = 3
 };
 
-// --- Per-battery-type protection/SOC thresholds ---
+// Per-battery-type protection/SOC thresholds
 struct BatteryProfile {
     const char* name;
     float nominalVoltage;
@@ -95,7 +84,7 @@ struct BatteryProfile {
     float capacityAh;
 };
 
-// --- Snapshot of live sensor data ---
+// Sensor data 
 struct SensorReadings {
     float voltage;
     float current;
@@ -103,7 +92,7 @@ struct SensorReadings {
     unsigned long timestampMs;
 };
 
-// --- Fault bitmask flags ---
+// Fault flaging
 enum FaultFlag : uint16_t {
     FAULT_NONE             = 0,
     FAULT_OVER_VOLTAGE     = 1 << 0,
@@ -113,17 +102,16 @@ enum FaultFlag : uint16_t {
     FAULT_SENSOR_ERROR     = 1 << 4
 };
 
-// --- Battery health classification ---
+// Battery health classification
 enum class BatteryHealth : uint8_t {
     GOOD = 0,
     DEGRADED = 1,
     POOR = 2
 };
 
-// ============================================================================
-// SECTION 3: BATTERY PROFILE MANAGER
-// Realistic lead-acid thresholds for each supported battery type.
-// ============================================================================
+
+// Realistic lead-acid thresholds for each battery type.
+
 class BatteryProfileManager {
 public:
     BatteryProfileManager() : activeType(BatteryType::CAR) {}   // Default to Car profile
@@ -131,16 +119,11 @@ public:
     // Switch the active battery profile to the given type.
     void setBatteryType(BatteryType type) { activeType = type; }
 
-    // Return the enum of the currently active battery type.
-    BatteryType getBatteryType() const { return activeType; }
-
-    // Return a reference to the full threshold struct for the active battery type.
+    BatteryType getBatteryType() const { return active
     const BatteryProfile& getActiveProfile() const { return profiles[static_cast<uint8_t>(activeType)]; }
 
-    // Return the human-readable name of the active battery type.
     const char* getBatteryTypeName() const { return profiles[static_cast<uint8_t>(activeType)].name; }
 
-    // Parse a command string (e.g. "motorcycle") into a BatteryType enum; returns false if unknown.
     static bool parseBatteryTypeFromString(const String& str, BatteryType& outType) {
         String s = str;
         s.toLowerCase();
@@ -155,7 +138,6 @@ public:
 private:
     BatteryType activeType;
 
-    // Lookup table: name, nominal, full, empty, OV, UV, OC(A), OT(C), capacity(Ah)
     static constexpr BatteryProfile profiles[4] = {
         { "Motorcycle", 12.0f, 13.0f, 11.5f, 14.8f, 11.0f,  30.0f, 50.0f,  9.0f  },
         { "Tuk-Tuk",     12.0f, 13.0f, 11.5f, 14.8f, 11.0f,  60.0f, 50.0f,  35.0f },
@@ -164,17 +146,14 @@ private:
     };
 };
 
-constexpr BatteryProfile BatteryProfileManager::profiles[4]; // Out-of-class definition for static constexpr array
+constexpr BatteryProfile BatteryProfileManager::profiles[4];   
 
-// ============================================================================
-// SECTION 4: SENSOR MANAGER
 // Reads and converts raw ADC data from the voltage divider, ACS712, and LM35.
-// ============================================================================
+
 class SensorManager {
 public:
     SensorManager() { lastReading = { 0.0f, 0.0f, 0.0f, 0 }; }
 
-    // Configure ADC resolution and pin modes for all analog inputs.
     void begin() {
         analogReadResolution(ADC_RESOLUTION_BITS);
         pinMode(PIN_VOLTAGE_SENSE, INPUT);
@@ -182,14 +161,13 @@ public:
         pinMode(PIN_TEMP_SENSE, INPUT);
     }
 
-    // Read the voltage divider pin and scale it back up to true battery voltage.
+    
     float readBatteryVoltage() {
         int raw = oversampleAnalogRead(PIN_VOLTAGE_SENSE, 10);
         float pinVoltage = rawAdcToVoltage(raw);
         return (pinVoltage * VOLTAGE_DIVIDER_RATIO) + VOLTAGE_CALIBRATION_OFFSET;
     }
 
-    // Read the ACS712 output pin and convert it to a current value in Amps.
     float readBatteryCurrent() {
         int raw = oversampleAnalogRead(PIN_CURRENT_SENSE, CURRENT_FILTER_SAMPLES);
         float pinVoltage = rawAdcToVoltage(raw);
@@ -197,7 +175,6 @@ public:
         return (deltaV_mV / ACS712_SENSITIVITY_MV_PER_A) + CURRENT_CALIBRATION_OFFSET;
     }
 
-    // Read the LM35 output pin and convert it to a temperature value in Celsius.
     float readBatteryTemperature() {
         int raw = oversampleAnalogRead(PIN_TEMP_SENSE, 10);
         float pinVoltage = rawAdcToVoltage(raw);
@@ -216,12 +193,11 @@ public:
     }
 
 private:
-    // Convert a raw ADC count (0-4095) into the voltage seen at the ESP32 ADC pin.
+   
     float rawAdcToVoltage(int rawAdc) {
         return (static_cast<float>(rawAdc) / ADC_MAX_VALUE) * ADC_REF_VOLTAGE;
     }
 
-    // Take multiple ADC samples and return their average to reduce sensor noise.
     int oversampleAnalogRead(uint8_t pin, uint8_t samples) {
         long sum = 0;
         for (uint8_t i = 0; i < samples; i++) {
@@ -234,10 +210,9 @@ private:
     SensorReadings lastReading;
 };
 
-// ============================================================================
-// SECTION 5: PROTECTION MANAGER
+
 // Fault detection, SOC estimation, battery health, and protective outputs.
-// ============================================================================
+
 class ProtectionManager {
 public:
     ProtectionManager()
@@ -248,7 +223,7 @@ public:
         pinMode(PIN_BATTERY_DISCONNECT, OUTPUT);
         pinMode(PIN_STATUS_LED_OK, OUTPUT);
         pinMode(PIN_STATUS_LED_FAULT, OUTPUT);
-        digitalWrite(PIN_BATTERY_DISCONNECT, LOW); // LOW = battery connected (safe default)
+        digitalWrite(PIN_BATTERY_DISCONNECT, LOW); // LOW = battery connected
         digitalWrite(PIN_STATUS_LED_OK, HIGH);
         digitalWrite(PIN_STATUS_LED_FAULT, LOW);
     }
@@ -273,12 +248,12 @@ public:
         updateOutputs();
     }
 
-    uint16_t getActiveFaults() const { return activeFaultBits; }                 // Get current fault bitmask
-    bool isBatteryDisconnected() const { return disconnected; }                   // Get disconnect relay state
-    uint8_t getStateOfCharge() const { return lastSocPercent; }                    // Get last computed SOC
-    BatteryHealth getBatteryHealth() const { return lastHealth; }                   // Get last health classification
+    uint16_t getActiveFaults() const { return activeFaultBits; }                 
+    bool isBatteryDisconnected() const { return disconnected; }                  
+    uint8_t getStateOfCharge() const { return lastSocPercent; }                   
+    BatteryHealth getBatteryHealth() const { return lastHealth; } 
 
-    // Build a comma-separated human-readable string of all active faults.
+    // Build a human-readable string of all active faults.
     String getActiveFaultsAsString() const {
         if (activeFaultBits == FAULT_NONE) return "None";
         String result = "";
@@ -339,7 +314,7 @@ private:
         return static_cast<uint8_t>(constrain(percent, 0.0f, 100.0f));
     }
 
-    // Assess battery health based on voltage sag relative to current draw (simple heuristic).
+    // Assess battery health based on voltage sag relative to current draw
     BatteryHealth assessHealth(float voltage, float current, const BatteryProfile& profile) {
         float sagMargin = voltage - profile.underVoltageCutoff;
         if (current > (profile.overCurrentCutoff * 0.5f) && sagMargin < 0.3f) return BatteryHealth::POOR;
@@ -360,10 +335,9 @@ private:
     bool disconnected;
 };
 
-// ============================================================================
-// SECTION 6: FAN CONTROL
-// Hysteresis-based cooling fan control driven by battery temperature.
-// ============================================================================
+
+// cooling fan control driven by battery temperature.
+
 class FanControl {
 public:
     FanControl() : fanOn(false) {}
@@ -388,12 +362,12 @@ private:
     bool fanOn;
 };
 
-// ============================================================================
-// SECTION 7: COMMUNICATION MANAGER
+
 // Bluetooth Serial command interface + Wi-Fi HTTP/JSON status API.
-// ============================================================================
+
 class CommunicationManager {
 public:
+
     // Constructor wires up references to all subsystems needed for status/commands.
     CommunicationManager(BatteryProfileManager& profileMgr, ProtectionManager& protectionMgr, FanControl& fanCtrl)
         : profileManager(profileMgr), protectionManager(protectionMgr), fanControl(fanCtrl),
@@ -411,7 +385,7 @@ public:
         Serial.println("[HTTP] Web server started on port " + String(HTTP_SERVER_PORT));
     }
 
-    // Poll Bluetooth and HTTP clients; should be called once per main loop() iteration.
+    // Poll Bluetooth and HTTP clients; should be called once per main loop()
     void update(const SensorReadings& readings) {
         latestReadings = readings;
         handleBluetoothCommands();
@@ -419,7 +393,6 @@ public:
         httpServer.handleClient();
     }
 
-    // Build the /status JSON payload used by both the HTTP API and the BT get_status command.
     String buildStatusJson(const SensorReadings& readings) const {
         String json = "{";
         json += "\"battery_type\":\"" + String(profileManager.getBatteryTypeName()) + "\",";
@@ -435,8 +408,7 @@ public:
     }
 
 private:
-    // Attempt to connect to Wi-Fi in station mode, waiting up to WIFI_CONNECT_TIMEOUT_MS.
-    void connectToWiFi() {
+    // Attempt to connect to Wi-Fi in station mode
         Serial.println("[WiFi] Connecting to SSID: " + String(WIFI_SSID));
         WiFi.mode(WIFI_STA);
         WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -550,9 +522,7 @@ private:
     bool wifiWasConnected;
 };
 
-// ============================================================================
-// SECTION 8: GLOBAL INSTANCES & APPLICATION ENTRY POINT
-// ============================================================================
+
 SensorManager sensorManager;
 BatteryProfileManager profileManager;
 ProtectionManager protectionManager;
@@ -568,7 +538,6 @@ SensorReadings currentReadings;
 
 void printStatusToSerial(); // Forward declaration
 
-// --- setup() - runs once at boot ---
 void setup() {
     Serial.begin(SERIAL_BAUD_RATE);
     delay(500);
@@ -587,7 +556,6 @@ void setup() {
     Serial.println("=================================================\n");
 }
 
-// --- loop() - runs continuously ---
 void loop() {
     unsigned long now = millis();
 
@@ -614,7 +582,7 @@ void loop() {
     }
 }
 
-// --- Print a concise, human-readable status summary to the USB serial console ---
+// Print human-readable status summary to the USB serial console
 void printStatusToSerial() {
     Serial.println("---------------------------------------------------");
     Serial.println("Battery Type : " + String(profileManager.getBatteryTypeName()));
